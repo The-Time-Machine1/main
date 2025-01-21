@@ -10,10 +10,22 @@ load_dotenv()
 # Create FastAPI app
 app = FastAPI(title="Repository Visualizer API")
 
+# Add root route
+@app.get("/")
+async def root():
+    return {
+        "message": "Welcome to Repository Visualizer API",
+        "documentation": "/docs",
+        "status": "online"
+    }
+
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # Frontend URL
+    allow_origins=[
+        "https://main-jc47.onrender.com",  # Production frontend
+        "http://localhost:5173",           # Development frontend
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -38,15 +50,20 @@ async def startup_event():
     else:
         print("All required environment variables are present")
     
-    print(f"API will be available at: http://localhost:8000")
-    print(f"Documentation will be available at: http://localhost:8000/docs")
+    # Use environment variable for port, with 8000 as fallback
+    port = int(os.getenv("PORT", 8000))
+    host = "0.0.0.0"
+    
+    print(f"API will be available at: http://{host}:{port}")
+    print(f"Documentation will be available at: http://{host}:{port}/docs")
 
 if __name__ == "__main__":
     import uvicorn
+    port = int(os.getenv("PORT", 8000))
     uvicorn.run(
         "main:app", 
-        host="0.0.0.0", 
-        port=8000, 
+        host="0.0.0.0",
+        port=port,
         reload=True,
         log_level="info"
     )
