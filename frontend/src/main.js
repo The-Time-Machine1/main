@@ -42,7 +42,7 @@ class RepositoryVisualizer {
      */
     async loadOpenAIKey() {
         try {
-            const res = await fetch('/api/v1/config/openai-key');
+            const res = await fetch('https://backend-a8mm.onrender.com/api/v1/config/openai-key');
             if (!res.ok) {
                 const errText = await res.text();
                 throw new Error(errText || 'Failed to load OpenAI key');

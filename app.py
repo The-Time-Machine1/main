@@ -4,6 +4,13 @@ from dotenv import load_dotenv, set_key
 import os
 import json
 
+# Load environment variables
+load_dotenv()
+
+# Configure environment variables with defaults
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'https://main-jc47.onrender.com')
+BACKEND_URL = os.getenv('BACKEND_URL', 'https://backend-a8mm.onrender.com')
+
 def save_to_env(api_key):
     """Save API key to .env file"""
     try:
@@ -27,97 +34,29 @@ def create_visualization_html(repo_data=None):
                     margin: 0;
                     padding: 0;
                     overflow: hidden;
-                    position: fixed;
                 }}
                 .visualization-container {{
                     position: fixed;
                     top: 60px;
                     left: 0;
                     right: 0;
-                    bottom: -20px;  /* Extend a bit below */
-                    z-index: 9999;
+                    bottom: 0;
                     display: flex;
                     overflow: hidden;
-                    background-color: rgb(17, 19, 23);
                 }}
-                #visualization {{
-                    flex: 1;
-                    border-left: 4px solid #666;
-                    border-right: 4px solid #666;
-                    background-color: rgb(17, 19, 23);
-                    min-width: 0;
-                    box-sizing: border-box;
-                    overflow: hidden;
-                }}
-                #left-border, #right-border {{
-                    width: 4px;
+                iframe {{
+                    width: 100%;
                     height: 100%;
-                    background: #666;
-                    cursor: ew-resize;
+                    border: none;
                 }}
             </style>
             <script>
-                window.initialRepoData = {json.dumps(repo_data) if repo_data else 'null'};
-                
-                // Add drag functionality for borders
-                function initDraggableBorders() {{
-                    let isLeftDragging = false;
-                    let isRightDragging = false;
-                    let startX = 0;
-                    let startLeft = 0;
-                    let startRight = 0;
-                    
-                    const container = document.querySelector('.visualization-container');
-                    const leftBorder = document.getElementById('left-border');
-                    const rightBorder = document.getElementById('right-border');
-                    const viz = document.getElementById('visualization');
-                    
-                    leftBorder.addEventListener('mousedown', (e) => {{
-                        isLeftDragging = true;
-                        startX = e.clientX;
-                        startLeft = parseInt(getComputedStyle(viz).marginLeft || '0');
-                    }});
-                    
-                    rightBorder.addEventListener('mousedown', (e) => {{
-                        isRightDragging = true;
-                        startX = e.clientX;
-                        startRight = parseInt(getComputedStyle(viz).marginRight || '0');
-                    }});
-                    
-                    document.addEventListener('mousemove', (e) => {{
-                        if (isLeftDragging) {{
-                            const diff = e.clientX - startX;
-                            viz.style.marginLeft = `${{startLeft + diff}}px`;
-                        }}
-                        if (isRightDragging) {{
-                            const diff = startX - e.clientX;
-                            viz.style.marginRight = `${{startRight + diff}}px`;
-                        }}
-                    }});
-                    
-                    document.addEventListener('mouseup', () => {{
-                        isLeftDragging = false;
-                        isRightDragging = false;
-                    }});
-                }}
-                
-                // Initialize after DOM load
-                document.addEventListener('DOMContentLoaded', initDraggableBorders);
-                
-                window.addEventListener('message', function(event) {{
-                    console.log('Message received:', event.data);
-                    if (window.app) {{
-                        window.app.handleAnalyzeClick();
-                    }}
-                }});
+                window.repoData = {json.dumps(repo_data) if repo_data else 'null'};
             </script>
-            <script type="module" src="http://localhost:5173/src/main.js" defer></script>
         </head>
         <body>
             <div class="visualization-container">
-                <div id="left-border"></div>
-                <div id="visualization"></div>
-                <div id="right-border"></div>
+                <iframe src="{FRONTEND_URL}" frameborder="0"></iframe>
             </div>
         </body>
         </html>
@@ -141,18 +80,28 @@ def main():
         if st.button("Analyze Repository"):
             with st.spinner("Analyzing repository..."):
                 try:
+                    # Adjust the route to match /api/v1/analyze
                     response = requests.post(
-                        'http://localhost:8000/api/v1/analyze',
-                        json={'owner': owner, 'repo': repo, 'limit': 50}
+                        f'{BACKEND_URL}/api/v1/analyze',
+                        json={'owner': owner, 'repo': repo, 'limit': 50},
+                        headers={
+                            'Content-Type': 'application/json',
+                            # Include the API key header if you're using it:
+                            'X-API-Key': os.getenv('API_KEY', '')  
+                        }
                     )
                     if response.ok:
                         st.session_state.repo_data = response.json()
                         st.session_state.visualization_counter += 1
                         st.success("Analysis complete!")
                     else:
-                        st.error(f"Analysis failed: {response.text}")
+                        st.error(f"Analysis failed: {response.status_code} - {response.text}")
+                        # Debugging print
+                        print(f"Response content: {response.content}")
                 except Exception as e:
                     st.error(f"Error during analysis: {str(e)}")
+                    # Debugging print
+                    print(f"Exception details: {str(e)}")
 
         st.divider()
         
@@ -216,6 +165,7 @@ def main():
                 
                 iframe {
                     height: calc(100vh - 60px) !important;
+                    background-color: rgb(17, 19, 23);
                 }
             </style>
         """, unsafe_allow_html=True)
