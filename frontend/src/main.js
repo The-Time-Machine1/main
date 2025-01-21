@@ -6,12 +6,39 @@ class RepositoryVisualizer {
     constructor() {
         this.visualizer = null;
         this.isInitializing = false;
-        this.initializeUI();
+        
+        // Check for initial data from Streamlit
+        if (window.initialRepoData) {
+            console.log('Initial repository data detected from Streamlit');
+            this.initializeWithData(window.initialRepoData);
+        } else {
+            this.initializeUI();
+        }
+    }
+
+    /**
+     * Initialize with data provided by Streamlit
+     */
+    async initializeWithData(data) {
+        console.log('Initializing with provided data:', data);
+        try {
+            await this.initializeUI();
+            
+            if (this.visualizer && data.nodes && data.edges) {
+                this.updateProgress(50, 'Rendering visualization...');
+                await this.visualizer.visualizeData(data);
+                this.updateDiagnostics('Visualization initialized with provided data');
+                this.updateProgress(100, 'Complete');
+            }
+        } catch (error) {
+            console.error('Error initializing with data:', error);
+            this.updateDiagnostics(`Error: ${error.message}`, 'error');
+            this.updateProgress(0, 'failed');
+        }
     }
 
     /**
      * Fetch the OpenAI key from the backend and set window.OPENAI_API_KEY
-     * so TreeVisualizer.js can use it in the Authorization header.
      */
     async loadOpenAIKey() {
         try {
@@ -22,18 +49,18 @@ class RepositoryVisualizer {
             }
             const data = await res.json();
             window.OPENAI_API_KEY = data.key; 
-            console.log('Loaded OpenAI key:', data.key);
+            console.log('Loaded OpenAI key successfully');
         } catch (err) {
             console.error('Error loading OpenAI key:', err);
             this.updateDiagnostics(`Error loading OpenAI key: ${err.message}`, 'error');
         }
     }
 
-    initializeUI() {
+    async initializeUI() {
         console.log('Initializing application...');
 
         // Load the OpenAI API key before we do anything else
-        this.loadOpenAIKey();
+        await this.loadOpenAIKey();
 
         // Initialize visualizer
         try {
@@ -44,46 +71,40 @@ class RepositoryVisualizer {
 
             this.visualizer = new TreeVisualizer('visualization');
             console.log('TreeVisualizer initialized');
-
-            // Setup event listeners
-            this.setupEventListeners();
             
             // Clear any existing progress display
             this.updateProgress(0, '');
             this.clearDiagnostics();
             
+            // Setup communication with Streamlit
+            this.setupStreamlitCommunication();
+            
             console.log('Application initialized successfully');
+            return true;
 
         } catch (error) {
             console.error('Error initializing application:', error);
             this.updateDiagnostics(`Initialization error: ${error.message}`, 'error');
             this.updateProgress(0, 'failed');
-        }
-    }
-
-    setupEventListeners() {
-        // Setup analyze button
-        const analyzeBtn = document.getElementById('analyzeBtn');
-        if (analyzeBtn) {
-            analyzeBtn.addEventListener('click', () => this.handleAnalyzeClick());
-        } else {
-            console.error('Analyze button not found');
-        }
-
-        // Setup clear diagnostics button
-        const clearDiagnosticsBtn = document.getElementById('clearDiagnostics');
-        if (clearDiagnosticsBtn) {
-            clearDiagnosticsBtn.addEventListener('click', () => this.clearDiagnostics());
-        }
-
-        // Add window error handler
-        window.onerror = (msg, url, lineNo, columnNo, error) => {
-            this.updateDiagnostics(`Runtime error: ${msg}`, 'error');
             return false;
-        };
+        }
     }
 
-    async handleAnalyzeClick() {
+    setupStreamlitCommunication() {
+        // Listen for messages from Streamlit
+        window.addEventListener('message', async (event) => {
+            const data = event.data;
+            console.log('Received message from Streamlit:', data);
+
+            if (data.type === 'analyze' && data.payload) {
+                await this.handleAnalyzeData(data.payload);
+            } else if (data.type === 'clear') {
+                this.clearVisualization();
+            }
+        });
+    }
+
+    async handleAnalyzeData(data) {
         if (this.isInitializing) {
             console.log('Analysis already in progress, please wait...');
             return;
@@ -91,56 +112,15 @@ class RepositoryVisualizer {
 
         try {
             this.isInitializing = true;
-            const ownerInput = document.getElementById('owner');
-            const repoInput = document.getElementById('repo');
             
-            if (!ownerInput || !repoInput) {
-                throw new Error('Required input elements not found');
-            }
-
-            const owner = ownerInput.value.trim();
-            const repo = repoInput.value.trim();
-
-            if (!owner || !repo) {
-                throw new Error('Please enter both repository owner and name');
-            }
-
             // Reset state
             this.updateProgress(0, 'Initializing...');
             this.clearDiagnostics();
-            this.updateDiagnostics(`Analyzing repository: ${owner}/${repo}`);
+            this.updateDiagnostics(`Processing repository data...`);
             
             // Clear previous visualization
             if (this.visualizer) {
                 this.visualizer.clearVisualization();
-            }
-
-            // Make API request
-            this.updateProgress(20, 'Connecting to server...');
-            const response = await fetch('/api/v1/analyze', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ 
-                    owner, 
-                    repo, 
-                    limit: 50 
-                })
-            });
-
-            this.updateProgress(50, 'Processing response...');
-
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(errorText || 'Failed to analyze repository');
-            }
-
-            const data = await response.json();
-            console.log('Received visualization data:', data);
-
-            if (!data.nodes || !data.edges) {
-                throw new Error('Invalid data format received from server');
             }
 
             this.updateProgress(80, 'Rendering visualization...');
@@ -163,6 +143,14 @@ class RepositoryVisualizer {
         }
     }
 
+    clearVisualization() {
+        if (this.visualizer) {
+            this.visualizer.clearVisualization();
+            this.clearDiagnostics();
+            this.updateProgress(0, '');
+        }
+    }
+
     updateDiagnostics(message, type = 'info') {
         const diagnosticsContent = document.getElementById('diagnosticsContent');
         if (!diagnosticsContent) return;
@@ -173,6 +161,15 @@ class RepositoryVisualizer {
         entry.innerHTML = `${timestamp} - ${message}`;
         diagnosticsContent.appendChild(entry);
         diagnosticsContent.scrollTop = diagnosticsContent.scrollHeight;
+
+        // Send diagnostics to Streamlit
+        if (window.parent) {
+            window.parent.postMessage({
+                type: 'diagnostics',
+                message: `${timestamp} - ${message}`,
+                messageType: type
+            }, '*');
+        }
     }
 
     clearDiagnostics() {
@@ -217,6 +214,15 @@ class RepositoryVisualizer {
             default:
                 progressContainer.classList.remove('failed');
                 progressStatus.textContent = status;
+        }
+
+        // Send progress to Streamlit
+        if (window.parent) {
+            window.parent.postMessage({
+                type: 'progress',
+                percentage,
+                status
+            }, '*');
         }
     }
 

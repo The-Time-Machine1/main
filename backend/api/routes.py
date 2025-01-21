@@ -1,14 +1,13 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Security, Depends
 from typing import Dict, Optional
 import os
 from pydantic import BaseModel
 from analyzer.repo_analyzer import RepositoryAnalyzer
 from analyzer.graph_processor import GraphProcessor
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key
 import traceback
 import logging
 from fastapi.security import APIKeyHeader
-from fastapi import Security, Depends
 import aiohttp
 
 # Configure logging
@@ -50,12 +49,13 @@ class DiffRequest(BaseModel):
 class OpenAIKeyResponse(BaseModel):
     key: str
 
+class ApiKeyUpdate(BaseModel):
+    key: str
+    user_name: str
+
 @router.get("/api/v1/config/openai-key", response_model=OpenAIKeyResponse)
 async def get_openai_key(api_key: str = Depends(verify_api_key)):
-    """
-    Returns a configured OpenAI key for frontend use.
-    Requires API key authentication if configured.
-    """
+    """Returns a configured OpenAI key for frontend use"""
     try:
         openai_key = os.getenv("OPENAI_API_KEY")
         if not openai_key:
@@ -63,9 +63,7 @@ async def get_openai_key(api_key: str = Depends(verify_api_key)):
                 status_code=500,
                 detail="OpenAI API key not configured on server"
             )
-        
         return OpenAIKeyResponse(key=openai_key)
-    
     except HTTPException as he:
         raise he
     except Exception as e:
@@ -75,17 +73,22 @@ async def get_openai_key(api_key: str = Depends(verify_api_key)):
             detail="Failed to retrieve OpenAI key"
         )
 
-@router.post("/api/v1/analyze")
-async def analyze_repository(
-    request: RepositoryRequest,
-    api_key: str = Depends(verify_api_key)
-):
-    """
-    Analyzes a GitHub repository and returns the processed data
-    for visualization
-    """
+@router.post("/api/v1/config/update-key")
+async def update_api_key(key_data: ApiKeyUpdate, api_key: str = Depends(verify_api_key)):
+    """Updates the OpenAI API key in the .env file"""
     try:
-        # Get tokens from environment variables
+        env_path = '.env'
+        set_key(env_path, 'OPENAI_API_KEY', key_data.key)
+        logger.info(f"API key updated by user: {key_data.user_name}")
+        return {"status": "success", "message": "API key updated successfully"}
+    except Exception as e:
+        logger.error(f"Error updating API key: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/api/v1/analyze")
+async def analyze_repository(request: RepositoryRequest, api_key: str = Depends(verify_api_key)):
+    """Analyzes a GitHub repository and returns visualization data"""
+    try:
         github_token = os.getenv("GITHUB_TOKEN")
         openai_key = os.getenv("OPENAI_API_KEY")
 
@@ -96,13 +99,11 @@ async def analyze_repository(
                 detail="Missing API keys in server configuration"
             )
 
-        # Initialize analyzer
         analyzer = RepositoryAnalyzer(
             github_token=github_token,
             openai_key=openai_key
         )
 
-        # Analyze repository
         logger.info(f"Analyzing repository: {request.owner}/{request.repo}")
         try:
             graph = await analyzer.analyze_repository(
@@ -120,16 +121,13 @@ async def analyze_repository(
             
             logger.info(f"Graph created with {graph.number_of_nodes()} nodes")
             
-            # Process graph for visualization
             processor = GraphProcessor(graph)
             visualization_data = processor.process_for_visualization()
             
-            # Add OpenAI key to visualization data
             visualization_data['config'] = {
                 'openai_key': openai_key
             }
             
-            # Validate visualization data
             if not visualization_data.get('nodes') or not visualization_data.get('edges'):
                 logger.error("Invalid visualization data structure")
                 raise HTTPException(
@@ -138,8 +136,6 @@ async def analyze_repository(
                 )
             
             logger.info(f"Processed {len(visualization_data['nodes'])} nodes and {len(visualization_data['edges'])} edges")
-            logger.info(f"Sample node data: {visualization_data['nodes'][0] if visualization_data['nodes'] else 'No nodes'}")
-            
             return visualization_data
             
         except Exception as e:
@@ -161,13 +157,8 @@ async def analyze_repository(
         )
 
 @router.post("/api/v1/diff")
-async def get_file_diff(
-    request: DiffRequest,
-    api_key: str = Depends(verify_api_key)
-):
-    """
-    Retrieves the diff content for a specific file in a commit
-    """
+async def get_file_diff(request: DiffRequest, api_key: str = Depends(verify_api_key)):
+    """Retrieves the diff content for a specific file in a commit"""
     try:
         github_token = os.getenv("GITHUB_TOKEN")
         if not github_token:
@@ -181,7 +172,6 @@ async def get_file_diff(
             'Accept': 'application/vnd.github.v3.diff'
         }
 
-        # First, get the commit details to find parent
         async with aiohttp.ClientSession() as session:
             commit_url = f'https://api.github.com/repos/{request.owner}/{request.repo}/commits/{request.commit}'
             async with session.get(commit_url, headers=headers) as response:
@@ -193,7 +183,6 @@ async def get_file_diff(
                     )
                 commit_data = await response.json()
 
-            # Get the specific file diff
             diff_url = f'https://api.github.com/repos/{request.owner}/{request.repo}/commits/{request.commit}'
             async with session.get(diff_url, headers=headers) as response:
                 if response.status != 200:
@@ -204,8 +193,6 @@ async def get_file_diff(
                     )
                 
                 full_diff = await response.text()
-                
-                # Parse the full diff to extract the specific file's diff
                 file_diffs = parse_diff(full_diff)
                 requested_diff = file_diffs.get(request.file)
                 
@@ -233,14 +220,9 @@ def parse_diff(diff_content: str) -> Dict[str, str]:
     
     for line in diff_content.split('\n'):
         if line.startswith('diff --git'):
-            # Save previous file content if exists
             if current_file and current_content:
                 files[current_file] = '\n'.join(current_content)
-            
-            # Start new file
             current_content = [line]
-            # Extract filename from diff --git line
-            # Format is typically: diff --git a/path/to/file b/path/to/file
             try:
                 current_file = line.split(' b/')[-1]
             except:
@@ -248,7 +230,6 @@ def parse_diff(diff_content: str) -> Dict[str, str]:
         elif current_file:
             current_content.append(line)
     
-    # Add the last file
     if current_file and current_content:
         files[current_file] = '\n'.join(current_content)
     
