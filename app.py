@@ -21,17 +21,12 @@ def save_to_env(api_key):
         st.error(f"Error saving API key: {e}")
         return False
 
-def create_visualization_html(repo_data=None):
+def create_visualization_html(repo_data=None, owner=None, repo=None):
     """Create HTML for visualization with data injection"""
-    # Get URL parameters if they exist
-    params = st.experimental_get_query_params()
-    owner = params.get('owner', [None])[0]
-    repo = params.get('repo', [None])[0]
-    
-    # Build the frontend URL with parameters if they exist
+    # Build the frontend URL with parameters
     frontend_url = FRONTEND_URL
     if owner and repo:
-        frontend_url = f"{FRONTEND_URL}?owner={owner}&repo={repo}"
+        frontend_url = f"{FRONTEND_URL}/?owner={owner}&repo={repo}"
 
     return f"""
         <!DOCTYPE html>
@@ -66,7 +61,7 @@ def create_visualization_html(repo_data=None):
         </head>
         <body>
             <div class="visualization-container">
-                <iframe src="{frontend_url}" frameborder="0"></iframe>
+                <iframe src="{frontend_url}" frameborder="0" allow="clipboard-write"></iframe>
             </div>
         </body>
         </html>
@@ -82,9 +77,8 @@ def main():
         st.session_state.visualization_counter = 0
 
     # Get URL parameters if they exist
-    params = st.experimental_get_query_params()
-    url_owner = params.get('owner', [None])[0]
-    url_repo = params.get('repo', [None])[0]
+    url_owner = st.query_params.get('owner')
+    url_repo = st.query_params.get('repo')
 
     # Sidebar for repository input
     with st.sidebar:
@@ -92,14 +86,13 @@ def main():
         owner = st.text_input("Repository Owner", value=url_owner or "microsoft")
         repo = st.text_input("Repository Name", value=url_repo or "vscode")
         
-        # Direct link for sharing
-        current_page = st.get_page_config().get('page_url', '')
-        share_url = f"{current_page}?owner={owner}&repo={repo}"
-        st.markdown(f"Share link: [{owner}/{repo}]({share_url})")
+        # Generate frontend URL
+        frontend_share_url = f"{FRONTEND_URL}/?owner={owner}&repo={repo}"
+        st.markdown(f"Direct link: [{owner}/{repo}]({frontend_share_url})")
         
-        # Debug information (can be commented out in production)
+        # Debug information
         with st.expander("Debug Info"):
-            st.write(f"Frontend URL: {FRONTEND_URL}")
+            st.write(f"Frontend URL: {frontend_share_url}")
             st.write(f"Backend URL: {BACKEND_URL}")
             st.write(f"API Key present: {'Yes' if os.getenv('API_KEY') else 'No'}")
         
@@ -118,8 +111,6 @@ def main():
                         st.session_state.repo_data = response.json()
                         st.session_state.visualization_counter += 1
                         st.success("Analysis complete!")
-                        # Update URL parameters
-                        st.experimental_set_query_params(owner=owner, repo=repo)
                     else:
                         st.error(f"Analysis failed: {response.status_code} - {response.text}")
                 except Exception as e:
@@ -127,18 +118,17 @@ def main():
 
         st.divider()
         
-        # Create scrollable container for chat messages
+        # Chat section
         st.markdown('<div class="sidebar-chat-container">', unsafe_allow_html=True)
         for msg in st.session_state.messages:
             with st.chat_message(msg["role"]):
                 st.write(msg["content"])
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # Fixed chat input at bottom
         if prompt := st.chat_input("Ask a question..."):
             st.session_state.messages.append({"role": "user", "content": prompt})
-            # TODO: Implement actual chat response handling
-            st.session_state.messages.append({"role": "assistant", "content": "This is a placeholder response"})
+            # TODO: Implement chat response
+            st.session_state.messages.append({"role": "assistant", "content": "Feature coming soon!"})
             st.rerun()
 
     # Main area for visualization
@@ -156,65 +146,26 @@ def main():
                         st.success("API key saved successfully!")
                         st.rerun()
     else:
-        # If URL parameters are present and no analysis has been done yet, trigger automatic analysis
-        if url_owner and url_repo and not st.session_state.repo_data:
-            with st.spinner(f"Analyzing {url_owner}/{url_repo}..."):
-                try:
-                    response = requests.post(
-                        f'{BACKEND_URL}/api/v1/analyze',
-                        json={'owner': url_owner, 'repo': url_repo, 'limit': 50},
-                        headers={
-                            'Content-Type': 'application/json',
-                            'X-API-Key': os.getenv('API_KEY', '')
-                        }
-                    )
-                    if response.ok:
-                        st.session_state.repo_data = response.json()
-                        st.session_state.visualization_counter += 1
-                        st.success("Analysis complete!")
-                    else:
-                        st.error(f"Analysis failed: {response.status_code} - {response.text}")
-                except Exception as e:
-                    st.error(f"Error during analysis: {str(e)}")
-
-        # Remove padding and maximize space
+        # Apply styling
         st.markdown("""
             <style>
-                .block-container {
-                    padding: 0;
-                    max-width: 100%;
-                }
-                
-                .main > div {
-                    padding: 0;
-                }
-                
-                #root > div:nth-child(1) > div.withScreencast > div > div > div > section.main {
-                    padding: 0;
-                }
-                
-                section.main {
-                    pointer-events: none;
-                }
-                
-                .stButton {
-                    pointer-events: auto;
-                }
-                
-                [data-testid="stAppViewContainer"] {
-                    background-color: rgb(17, 19, 23);
-                }
-                
-                iframe {
-                    height: calc(100vh - 60px) !important;
-                    background-color: rgb(17, 19, 23);
-                }
+                .block-container { padding: 0; max-width: 100%; }
+                .main > div { padding: 0; }
+                #root > div:nth-child(1) > div.withScreencast > div > div > div > section.main { padding: 0; }
+                section.main { pointer-events: none; }
+                .stButton { pointer-events: auto; }
+                [data-testid="stAppViewContainer"] { background-color: rgb(17, 19, 23); }
+                iframe { height: calc(100vh - 60px) !important; background-color: rgb(17, 19, 23); }
             </style>
         """, unsafe_allow_html=True)
         
         html_content = f"""
             <div style="display: none">{st.session_state.visualization_counter}</div>
-            {create_visualization_html(st.session_state.repo_data)}
+            {create_visualization_html(
+                repo_data=st.session_state.repo_data,
+                owner=owner,
+                repo=repo
+            )}
         """
         st.components.v1.html(html_content, height=1000)
 
