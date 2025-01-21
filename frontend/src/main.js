@@ -6,13 +6,60 @@ class RepositoryVisualizer {
     constructor() {
         this.visualizer = null;
         this.isInitializing = false;
+        this.backendURL = 'https://backend-a8mm.onrender.com';
         
-        // Check for initial data from Streamlit
-        if (window.initialRepoData) {
+        // Check URL parameters first, then fall back to Streamlit data
+        const urlParams = new URLSearchParams(window.location.search);
+        const owner = urlParams.get('owner');
+        const repo = urlParams.get('repo');
+        
+        if (owner && repo) {
+            console.log(`URL parameters detected: ${owner}/${repo}`);
+            this.initializeWithURLParams(owner, repo);
+        } else if (window.repoData) {
             console.log('Initial repository data detected from Streamlit');
-            this.initializeWithData(window.initialRepoData);
+            this.initializeWithData(window.repoData);
         } else {
             this.initializeUI();
+        }
+    }
+
+    /**
+     * Initialize with URL parameters
+     */
+    async initializeWithURLParams(owner, repo) {
+        console.log(`Fetching data for ${owner}/${repo}`);
+        try {
+            await this.initializeUI();
+            
+            this.updateProgress(20, 'Fetching repository data...');
+            
+            // Make API call to backend
+            const response = await fetch(`${this.backendURL}/api/v1/analyze`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-API-Key': window.OPENAI_API_KEY || ''
+                },
+                body: JSON.stringify({ owner, repo, limit: 50 })
+            });
+
+            if (!response.ok) {
+                throw new Error(`API call failed: ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            
+            if (this.visualizer && data.nodes && data.edges) {
+                this.updateProgress(50, 'Rendering visualization...');
+                await this.visualizer.visualizeData(data);
+                this.updateDiagnostics('Visualization initialized with URL parameters');
+                this.updateProgress(100, 'Complete');
+            }
+        } catch (error) {
+            console.error('Error initializing with URL parameters:', error);
+            this.updateDiagnostics(`Error: ${error.message}`, 'error');
+            this.updateProgress(0, 'failed');
         }
     }
 
@@ -42,7 +89,7 @@ class RepositoryVisualizer {
      */
     async loadOpenAIKey() {
         try {
-            const res = await fetch('https://backend-a8mm.onrender.com/api/v1/config/openai-key');
+            const res = await fetch(`${this.backendURL}/api/v1/config/openai-key`);
             if (!res.ok) {
                 const errText = await res.text();
                 throw new Error(errText || 'Failed to load OpenAI key');
