@@ -10,7 +10,9 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8000',
+        target: process.env.NODE_ENV === 'production' 
+          ? 'https://backend-a8mm.onrender.com'   // Production backend URL
+          : 'http://127.0.0.1:8000',             // Development backend URL
         changeOrigin: true,
         secure: false,
         ws: true,
@@ -27,7 +29,9 @@ export default defineConfig({
         },
       },
       '/streamlit': {
-        target: 'http://127.0.0.1:8501',
+        target: process.env.NODE_ENV === 'production'
+          ? 'https://your-streamlit-url.render.com'  // Replace with your Streamlit URL if you have one
+          : 'http://127.0.0.1:8501',
         changeOrigin: true,
         secure: false,
         ws: true,
